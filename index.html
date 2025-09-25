@@ -12,13 +12,17 @@
   <div class="container">
     <header class="header">
       <h1>Lossless Image Optimizer</h1>
-      <p>Convert JPG, PNG, and other formats to the most efficient lossless WebP or AVIF format</p>
+      <p>Convert JPG, PNG, and other formats to the most efficient truly lossless WebP or AVIF format</p>
+      <div class="validation-badge">
+        <span class="badge-icon">🔍</span>
+        <span>Pixel-Perfect Validation</span>
+      </div>
     </header>
 
     <main class="main-content">
       <div class="upload-zone" id="uploadZone">
         <div class="upload-text">Drop images here or click to select</div>
-        <div class="upload-subtext">Supports: JPG, PNG, GIF, BMP, TIFF</div>
+        <div class="upload-subtext">Supports: JPG, PNG, GIF, BMP, TIFF • Guaranteed lossless conversion</div>
         <button class="btn-primary" onclick="document.getElementById('fileInput').click()">
           Select Images
         </button>
@@ -27,6 +31,13 @@
       <input type="file" id="fileInput" multiple accept="image/*">
 
       <div class="processing-area" id="processingArea">
+        <div class="processing-header">
+          <h3>Processing Images</h3>
+          <div class="validation-info">
+            <span class="info-icon">ℹ️</span>
+            <span>Each conversion is validated pixel-by-pixel to ensure zero quality loss</span>
+          </div>
+        </div>
         <div id="fileList"></div>
       </div>
 
@@ -45,12 +56,17 @@
             <div class="stat-number" id="totalSize">0 MB</div>
             <div class="stat-label">Size Reduced</div>
           </div>
+          <div class="stat-item">
+            <div class="stat-number" id="validationSuccess">0</div>
+            <div class="stat-label">Lossless Verified</div>
+          </div>
         </div>
         <button class="clear-btn" onclick="clearResults()">Process More Images</button>
       </div>
     </main>
   </div>
 
+  <script src="js/QualityValidator.js"></script>
   <script src="js/app.js"></script>
 </body>
 

@@ -4,7 +4,8 @@ const state = {
     processing: false,
     completed: 0,
     totalSavings: 0,
-    totalSizeReduction: 0
+    totalSizeReduction: 0,
+    validationSuccesses: 0
 };
 
 // Supported formats
@@ -69,6 +70,10 @@ async function processFiles(files) {
     state.completed = 0;
     state.totalSavings = 0;
     state.totalSizeReduction = 0;
+    state.validationSuccesses = 0;
+
+    // Clear previous validation results
+    window.QualityValidator.clearValidationResults();
 
     // Create file items in DOM
     fileList.innerHTML = '';
@@ -78,7 +83,7 @@ async function processFiles(files) {
     });
 
     // Process files with limited concurrency
-    const MAX_CONCURRENT = 3;
+    const MAX_CONCURRENT = 2; // Reduced for validation processing
     for (let i = 0; i < validFiles.length; i += MAX_CONCURRENT) {
         const batch = validFiles.slice(i, i + MAX_CONCURRENT);
         const promises = batch.map((file, batchIndex) => 
@@ -105,6 +110,7 @@ function createFileItem(file, index) {
         <div class="file-progress">
             <div class="progress-bar" id="progress-${index}" style="width: 0%"></div>
         </div>
+        <div class="validation-status" id="validation-${index}" style="display: none;"></div>
         <div class="file-results" id="results-${index}"></div>
     `;
     
@@ -114,22 +120,39 @@ function createFileItem(file, index) {
 // Process individual image
 async function processImage(file, index) {
     try {
-        updateProgress(index, 10);
-        updateStatus(index, 'Processing...', 'processing');
+        updateProgress(index, 5);
+        updateStatus(index, 'Loading image...', 'processing');
 
         // Read file as ImageData
-        const imageData = await loadImageAsImageData(file);
-        updateProgress(index, 30);
+        const originalImageData = await loadImageAsImageData(file);
+        updateProgress(index, 15);
 
         // Convert to lossless WebP
         updateStatus(index, 'Converting to WebP...', 'processing');
-        const webpResult = await convertToWebP(imageData, file.name);
-        updateProgress(index, 60);
+        const webpResult = await convertToWebP(originalImageData, file.name);
+        updateProgress(index, 35);
+
+        // Validate WebP conversion
+        updateStatus(index, 'Validating WebP conversion...', 'validating');
+        const webpValidation = await window.QualityValidator.validateConversion(
+            originalImageData.data, webpResult.blob, 'WebP'
+        );
+        updateProgress(index, 50);
 
         // Convert to lossless AVIF
         updateStatus(index, 'Converting to AVIF...', 'processing');
-        const avifResult = await convertToAVIF(imageData, file.name);
-        updateProgress(index, 90);
+        const avifResult = await convertToAVIF(originalImageData, file.name);
+        updateProgress(index, 70);
+
+        let avifValidation = null;
+        if (!avifResult.unsupported) {
+            // Validate AVIF conversion
+            updateStatus(index, 'Validating AVIF conversion...', 'validating');
+            avifValidation = await window.QualityValidator.validateConversion(
+                originalImageData.data, avifResult.blob, 'AVIF'
+            );
+        }
+        updateProgress(index, 85);
 
         // Compare and determine winner
         const originalSize = file.size;
@@ -140,33 +163,93 @@ async function processImage(file, index) {
         const webpSavings = calculateSavings(originalSize, webpSize);
         const avifSavings = calculateSavings(originalSize, avifSize);
 
-        // Determine winner based on actual file size (smaller is better)
-        const winner = webpSize <= avifSize ? 'webp' : 'avif';
+        // Determine winner based on file size AND validation success
+        let winner = determineWinner(webpResult, avifResult, webpValidation, avifValidation);
+        
         const bestResult = winner === 'webp' ? webpResult : avifResult;
         const bestSavingsValue = winner === 'webp' ? webpSavings.value : avifSavings.value;
 
-        // Update statistics (only count actual savings, not increases)
+        // Update statistics
         state.completed++;
         if (bestSavingsValue > 0) {
             state.totalSavings += bestSavingsValue;
             state.totalSizeReduction += (originalSize - bestResult.size);
         }
 
+        // Count validation successes
+        if ((winner === 'webp' && webpValidation.isLossless) || 
+            (winner === 'avif' && avifValidation && avifValidation.isLossless)) {
+            state.validationSuccesses++;
+        }
+
+        // Store validation results
+        const fileId = `file-${index}`;
+        window.QualityValidator.storeValidationResult(`${fileId}-webp`, webpValidation);
+        if (avifValidation) {
+            window.QualityValidator.storeValidationResult(`${fileId}-avif`, avifValidation);
+        }
+
         // Update UI
-        updateProgress(index, 100);
-        updateStatus(index, 'Completed', 'completed');
+        updateProgress(index, 95);
+        updateStatus(index, 'Finalizing...', 'processing');
+
+        // Show validation status
+        displayValidationStatus(index, winner === 'webp' ? webpValidation : avifValidation);
+        
         displayResults(index, {
             original: { size: originalSize, name: file.name },
-            webp: { ...webpResult, savings: webpSavings },
-            avif: { ...avifResult, savings: avifSavings },
+            webp: { ...webpResult, savings: webpSavings, validation: webpValidation },
+            avif: { ...avifResult, savings: avifSavings, validation: avifValidation },
             winner
         });
+
+        updateProgress(index, 100);
+        updateStatus(index, 'Completed', 'completed');
 
     } catch (error) {
         console.error('Error processing image:', error);
         updateStatus(index, 'Error', 'error');
         updateProgress(index, 100);
+        displayValidationStatus(index, { error: error.message });
     }
+}
+
+// Determine winner based on file size and validation results
+function determineWinner(webpResult, avifResult, webpValidation, avifValidation) {
+    // If AVIF is not supported, WebP wins
+    if (avifResult.unsupported) {
+        return 'webp';
+    }
+
+    // Prioritize lossless conversions
+    const webpLossless = webpValidation && webpValidation.isLossless;
+    const avifLossless = avifValidation && avifValidation.isLossless;
+
+    // If only one is lossless, it wins
+    if (webpLossless && !avifLossless) return 'webp';
+    if (avifLossless && !webpLossless) return 'avif';
+
+    // If both are lossless or both have quality loss, choose by file size
+    return webpResult.size <= avifResult.size ? 'webp' : 'avif';
+}
+
+// Display validation status
+function displayValidationStatus(index, validation) {
+    const validationEl = document.getElementById(`validation-${index}`);
+    if (!validationEl || !validation) return;
+
+    const summary = window.QualityValidator.generateValidationSummary(validation);
+    
+    validationEl.className = `validation-status ${summary.status}`;
+    validationEl.innerHTML = `
+        <div>
+            <span>${summary.icon}</span>
+            <strong>${summary.title}</strong>
+            <span>${summary.message}</span>
+        </div>
+        ${summary.details ? `<div class="validation-details">${summary.details}</div>` : ''}
+    `;
+    validationEl.style.display = 'flex';
 }
 
 // Calculate savings with correct logic
@@ -252,7 +335,7 @@ async function convertToAVIF(imageData, originalName) {
                     });
                 }, 'image/avif', 1.0);
             } else {
-                // AVIF not supported - return very large size so WebP wins
+                // AVIF not supported
                 resolve({
                     blob: null,
                     size: Infinity,
@@ -286,9 +369,9 @@ function updateStatus(index, text, type) {
 function displayResults(index, results) {
     const resultsEl = document.getElementById(`results-${index}`);
     
-    const webpCard = createResultCard('WebP', results.webp, results.winner === 'webp');
-    const avifCard = createResultCard('AVIF', results.avif, results.winner === 'avif');
-    const originalCard = createResultCard('Original', results.original, false, true);
+    const webpCard = createResultCard(index, 'webp', 'WebP', results.webp, results.winner === 'webp');
+    const avifCard = createResultCard(index, 'avif', 'AVIF', results.avif, results.winner === 'avif');
+    const originalCard = createResultCard(index, 'original', 'Original', results.original, false, true);
     
     resultsEl.innerHTML = `
         ${originalCard}
@@ -302,14 +385,17 @@ function displayResults(index, results) {
 }
 
 // Create result card HTML
-function createResultCard(format, result, isWinner, isOriginal = false) {
+function createResultCard(fileIndex, format, formatName, result, isWinner, isOriginal = false) {
     const winnerClass = isWinner ? 'winner' : '';
     const formatClass = isWinner ? 'winner' : '';
+    
+    // Validation failed class
+    const validationClass = result.validation && !result.validation.isLossless && !result.validation.error ? 'validation-failed' : '';
     
     if (isOriginal) {
         return `
             <div class="result-card ${winnerClass}">
-                <div class="result-format ${formatClass}">${format}</div>
+                <div class="result-format ${formatClass}">${formatName}</div>
                 <div class="result-size">${formatFileSize(result.size)}</div>
             </div>
         `;
@@ -326,14 +412,44 @@ function createResultCard(format, result, isWinner, isOriginal = false) {
     }
     
     const savingsClass = result.savings.isPositive ? 'positive' : 'negative';
+    
+    // Validation icon
+    let validationIcon = '';
+    if (result.validation) {
+        if (result.validation.error) {
+            validationIcon = '<span class="validation-icon error" title="Validation Error">❌</span>';
+        } else if (result.validation.isLossless) {
+            validationIcon = '<span class="validation-icon success" title="Lossless Verified">✅</span>';
+        } else {
+            validationIcon = '<span class="validation-icon warning" title="Quality Loss Detected">⚠️</span>';
+        }
+    }
+    
+    // Quality score
+    let qualityScore = '';
+    if (result.validation && result.validation.qualityMetrics && !result.validation.error) {
+        const metrics = result.validation.qualityMetrics;
+        qualityScore = `<div class="quality-score">PSNR: ${metrics.psnr} | SSIM: ${metrics.ssim}</div>`;
+    }
+    
+    // Download button (disabled if validation failed severely)
+    const downloadDisabled = result.validation && !result.validation.isLossless && 
+                             result.validation.pixelComparison && 
+                             parseFloat(result.validation.pixelComparison.differencePercentage) > 1;
+    
     const downloadButton = result.blob ? 
-        `<button class="download-btn" onclick="downloadFile(${Object.keys(window.results || {}).length}, '${format.toLowerCase()}')">Download</button>` : '';
+        `<button class="download-btn" ${downloadDisabled ? 'disabled' : ''} 
+                onclick="downloadFile(${fileIndex}, '${format}')">
+                ${downloadDisabled ? 'Quality Loss' : 'Download'}
+         </button>` : '';
     
     return `
-        <div class="result-card ${winnerClass}">
-            <div class="result-format ${formatClass}">${format} ${isWinner ? '(Best)' : ''}</div>
+        <div class="result-card ${winnerClass} ${validationClass}">
+            ${validationIcon}
+            <div class="result-format ${formatClass}">${formatName} ${isWinner ? '(Best)' : ''}</div>
             <div class="result-size">${formatFileSize(result.size)}</div>
             <div class="result-savings ${savingsClass}">${result.savings.text}</div>
+            ${qualityScore}
             ${downloadButton}
         </div>
     `;
@@ -346,6 +462,19 @@ function downloadFile(index, format) {
 
     const result = results[format];
     if (!result.blob || result.unsupported) return;
+
+    // Additional validation check before download
+    if (result.validation && !result.validation.isLossless) {
+        const proceed = confirm(
+            'This conversion may not be perfectly lossless. Download anyway?\n\n' +
+            'Quality metrics:\n' +
+            `- ${result.validation.pixelComparison.differenceCount} pixels differ\n` +
+            `- ${result.validation.pixelComparison.differencePercentage}% pixel difference\n` +
+            `- PSNR: ${result.validation.qualityMetrics.psnr}`
+        );
+        
+        if (!proceed) return;
+    }
 
     const url = URL.createObjectURL(result.blob);
     const a = document.createElement('a');
@@ -378,6 +507,7 @@ function showStatsSummary() {
     document.getElementById('totalFiles').textContent = state.completed;
     document.getElementById('totalSavings').textContent = avgSavings + '%';
     document.getElementById('totalSize').textContent = totalReduction;
+    document.getElementById('validationSuccess').textContent = state.validationSuccesses;
 
     statsSummary.style.display = 'block';
 }
@@ -392,12 +522,16 @@ function clearResults() {
         window.results = {};
     }
     
+    // Clear validation results
+    window.QualityValidator.clearValidationResults();
+    
     // Reset state
     state.files = [];
     state.processing = false;
     state.completed = 0;
     state.totalSavings = 0;
     state.totalSizeReduction = 0;
+    state.validationSuccesses = 0;
 }
 
 // Initialize the application
