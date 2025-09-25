@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lossless Image Optimizer</title>
+  <link rel="stylesheet" href="css/main.css">
+</head>
+
+<body>
+  <div class="container">
+    <header class="header">
+      <h1>Lossless Image Optimizer</h1>
+      <p>Convert JPG, PNG, and other formats to the most efficient lossless WebP or AVIF format</p>
+    </header>
+
+    <main class="main-content">
+      <div class="upload-zone" id="uploadZone">
+        <div class="upload-text">Drop images here or click to select</div>
+        <div class="upload-subtext">Supports: JPG, PNG, GIF, BMP, TIFF</div>
+        <button class="btn-primary" onclick="document.getElementById('fileInput').click()">
+          Select Images
+        </button>
+      </div>
+
+      <input type="file" id="fileInput" multiple accept="image/*">
+
+      <div class="processing-area" id="processingArea">
+        <div id="fileList"></div>
+      </div>
+
+      <div class="stats-summary" id="statsSummary">
+        <div class="stats-title">Processing Summary</div>
+        <div class="stats-grid">
+          <div class="stat-item">
+            <div class="stat-number" id="totalFiles">0</div>
+            <div class="stat-label">Files Processed</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-number" id="totalSavings">0%</div>
+            <div class="stat-label">Average Savings</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-number" id="totalSize">0 MB</div>
+            <div class="stat-label">Size Reduced</div>
+          </div>
+        </div>
+        <button class="clear-btn" onclick="clearResults()">Process More Images</button>
+      </div>
+    </main>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+
+</html>
