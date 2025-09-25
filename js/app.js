@@ -23,7 +23,24 @@ const statsSummary = document.getElementById('statsSummary');
 
 // Initialize event listeners
 function init() {
-    uploadZone.addEventListener('click', () => fileInput.click());
+    // Check if all required elements exist
+    if (!uploadZone) {
+        console.error('Upload zone element not found');
+        alert('Error: Upload interface not found. Please refresh the page.');
+        return;
+    }
+    if (!fileInput) {
+        console.error('File input element not found');
+        alert('Error: File input not found. Please refresh the page.');
+        return;
+    }
+    
+    // Simple, reliable click handler for the entire upload zone
+    uploadZone.addEventListener('click', (e) => {
+        e.preventDefault();
+        fileInput.click();
+    });
+    
     uploadZone.addEventListener('dragover', handleDragOver);
     uploadZone.addEventListener('dragleave', handleDragLeave);
     uploadZone.addEventListener('drop', handleDrop);
@@ -50,11 +67,19 @@ function handleDrop(e) {
 
 function handleFileSelect(e) {
     const files = Array.from(e.target.files);
-    processFiles(files);
+    
+    if (files.length > 0) {
+        processFiles(files);
+    }
 }
 
 // Main file processing function
 async function processFiles(files) {
+    // Prevent double processing
+    if (state.processing) {
+        return;
+    }
+
     // Filter supported formats
     const validFiles = files.filter(file => SUPPORTED_FORMATS.includes(file.type));
     
@@ -94,6 +119,9 @@ async function processFiles(files) {
 
     // Show final statistics
     showStatsSummary();
+    
+    // Reset processing flag
+    state.processing = false;
 }
 
 // Create file item DOM element
@@ -207,10 +235,13 @@ async function processImage(file, index) {
         updateStatus(index, 'Completed', 'completed');
 
     } catch (error) {
-        console.error('Error processing image:', error);
+        console.error(`Error processing image ${index}:`, error);
         updateStatus(index, 'Error', 'error');
         updateProgress(index, 100);
         displayValidationStatus(index, { error: error.message });
+        
+        // Don't let one failed image break the entire batch
+        state.completed++;
     }
 }
 
@@ -517,7 +548,12 @@ function clearResults() {
     processingArea.style.display = 'none';
     statsSummary.style.display = 'none';
     fileList.innerHTML = '';
-    fileInput.value = '';
+    
+    // Don't clear the file input immediately - let user reselect if needed
+    setTimeout(() => {
+        fileInput.value = '';
+    }, 100);
+    
     if (window.results) {
         window.results = {};
     }
@@ -535,4 +571,13 @@ function clearResults() {
 }
 
 // Initialize the application
-document.addEventListener('DOMContentLoaded', init);
+document.addEventListener('DOMContentLoaded', () => {
+    // Check if QualityValidator is available
+    if (typeof window.QualityValidator === 'undefined') {
+        console.error('QualityValidator not loaded!');
+        alert('Error: Quality validation system not loaded. Please refresh the page.');
+        return;
+    }
+    
+    init();
+});
